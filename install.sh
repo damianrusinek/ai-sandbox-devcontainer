@@ -34,22 +34,24 @@ Commands:
     shell               Open a shell in the running container
     self-install        Install 'devc' command to ~/.local/bin
     update              Update devc to the latest version
-    template [dir]      Copy devcontainer template to directory (default: current)
-    exec <cmd>          Execute a command in the running container
-    upgrade             Upgrade Claude Code to latest version
+    upgrade-agents      Upgrade Claude Code and Codex CLI to latest
     mount <host> <cont> Add a mount to the devcontainer (recreates container)
-    build-image         Build Docker image from template repo (my-claude-code/devcontainer:local)
+    build-image         Build Docker image from template repo (my-ai-sandbox/devcontainer:local)
     help                Show this help message
+
+Options:
+    --custom            Use custom Dockerfile build instead of prebuilt image
+                        (applies to: ., up, rebuild)
 
 Examples:
     devc .                      # Install template and start container
+    devc . --custom             # Install template with custom Dockerfile build (you will need to update the Dockerfile in the workspace)
     devc up                     # Start container in current directory
     devc rebuild                # Clean rebuild
     devc shell                  # Open interactive shell
     devc self-install           # Install devc to PATH
     devc update                 # Update to latest version
-    devc exec ls -la            # Run command in container
-    devc upgrade                # Upgrade Claude Code to latest
+    devc upgrade-agents         # Upgrade Claude Code and Codex CLI
     devc mount ~/data /data     # Add mount to container
     devc build-image            # Build local devcontainer image
 EOF
@@ -98,9 +100,7 @@ extract_mounts_to_file() {
   custom_mounts=$(jq -c '
     .mounts // [] | map(
       select(
-        (startswith("source=claude-code-bashhistory-") | not) and
-        (startswith("source=claude-code-config-") | not) and
-        (startswith("source=claude-code-gh-") | not) and
+        (startswith("source=ai-sandbox-") | not) and
         (startswith("source=${localEnv:HOME}/.gitconfig,") | not)
       )
     ) | if length > 0 then . else empty end
@@ -131,6 +131,23 @@ merge_mounts_from_file() {
   echo "$updated" >"$devcontainer_json"
 }
 
+# Convert devcontainer.json from image-based to build-based configuration
+convert_to_build_config() {
+  local devcontainer_json="$1"
+
+  local updated
+  updated=$(jq 'del(.image) | .build = {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "TZ": "${localEnv:TZ:UTC}",
+      "GIT_DELTA_VERSION": "0.18.2",
+      "ZSH_IN_DOCKER_VERSION": "1.2.1"
+    }
+  }' "$devcontainer_json")
+
+  echo "$updated" >"$devcontainer_json"
+}
+
 # Add or update a mount in devcontainer.json
 update_devcontainer_mounts() {
   local devcontainer_json="$1"
@@ -154,10 +171,28 @@ update_devcontainer_mounts() {
 
 cmd_template() {
   local target_dir="${1:-.}"
+  local use_custom="${2:-false}"
+
   target_dir="$(cd "$target_dir" 2>/dev/null && pwd)" || {
     log_error "Directory does not exist: $1"
     exit 1
   }
+
+  # Check if base image exists when using custom Dockerfile mode
+  if [[ "$use_custom" == "true" ]]; then
+    if ! docker image inspect my-ai-sandbox/devcontainer:local &>/dev/null; then
+      log_warn "Base image 'my-ai-sandbox/devcontainer:local' not found."
+      read -p "Build it now? [y/N] " -n 1 -r
+      echo
+      if [[ $REPLY =~ ^[Yy]$ ]]; then
+        cmd_build_image
+      else
+        log_error "Cannot use --custom without the base image."
+        log_info "Build it first with: devc build-image"
+        exit 1
+      fi
+    fi
+  fi
 
   local devcontainer_dir="$target_dir/.devcontainer"
   local devcontainer_json="$devcontainer_dir/devcontainer.json"
@@ -185,6 +220,13 @@ cmd_template() {
   cp "$SCRIPT_DIR/devcontainer.json" "$devcontainer_dir/"
   cp "$SCRIPT_DIR/post_install.py" "$devcontainer_dir/"
   cp "$SCRIPT_DIR/.zshrc" "$devcontainer_dir/"
+
+  # Handle custom Dockerfile build mode
+  if [[ "$use_custom" == "true" ]]; then
+    cp "$SCRIPT_DIR/Dockerfile-custom" "$devcontainer_dir/Dockerfile"
+    convert_to_build_config "$devcontainer_json"
+    log_info "Using custom Dockerfile build mode"
+  fi
 
   # Restore preserved mounts
   if [[ -n "$preserved_mounts" ]]; then
@@ -226,9 +268,9 @@ cmd_build_image() {
     exit 1
   fi
 
-  log_info "Building my-claude-code/devcontainer:local (Dockerfile & context: $SCRIPT_DIR)..."
-  docker buildx build -f "$dockerfile" -t my-claude-code/devcontainer:local "$SCRIPT_DIR"
-  log_success "Image built: my-claude-code/devcontainer:local"
+  log_info "Building my-ai-sandbox/devcontainer:local (Dockerfile & context: $SCRIPT_DIR)..."
+  docker buildx build -f "$dockerfile" -t my-ai-sandbox/devcontainer:local "$SCRIPT_DIR"
+  log_success "Image built: my-ai-sandbox/devcontainer:local"
 }
 
 cmd_down() {
@@ -260,24 +302,16 @@ cmd_shell() {
   devcontainer exec --workspace-folder "$workspace_folder" zsh
 }
 
-cmd_exec() {
+cmd_upgrade_agents() {
   local workspace_folder
   workspace_folder="$(get_workspace_folder)"
 
   check_devcontainer_cli
-  devcontainer exec --workspace-folder "$workspace_folder" "$@"
-}
+  log_info "Upgrading Claude Code and Codex CLI..."
 
-cmd_upgrade() {
-  local workspace_folder
-  workspace_folder="$(get_workspace_folder)"
+  devcontainer exec --workspace-folder "$workspace_folder" zsh -lc 'claude update && npm install -g @openai/codex@latest'
 
-  check_devcontainer_cli
-  log_info "Upgrading Claude Code..."
-
-  devcontainer exec --workspace-folder "$workspace_folder" claude update
-
-  log_success "Claude Code upgraded"
+  log_success "Claude Code and Codex CLI upgraded"
 }
 
 cmd_mount() {
@@ -303,7 +337,7 @@ cmd_mount() {
   local devcontainer_json="$workspace_folder/.devcontainer/devcontainer.json"
 
   if [[ ! -f "$devcontainer_json" ]]; then
-    log_error "No devcontainer.json found. Run 'devc template' first."
+    log_error "No devcontainer.json found. Run 'devc .' first."
     exit 1
   fi
 
@@ -341,7 +375,7 @@ cmd_update() {
 
   if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
     log_error "Not a git repository: $SCRIPT_DIR"
-    log_info "Re-clone with: rm -rf ~/.claude-devcontainer && git clone https://github.com/trailofbits/claude-code-devcontainer ~/.claude-devcontainer"
+    log_info "Re-clone with: rm -rf ~/.ai-sandbox-devcontainer && git clone https://github.com/damianrusinek/ai-sandbox-devcontainer ~/.ai-sandbox-devcontainer"
     exit 1
   fi
 
@@ -363,9 +397,25 @@ cmd_update() {
 }
 
 cmd_dot() {
+  local use_custom="${1:-false}"
   # Install template and start container in one command
-  cmd_template "."
+  cmd_template "." "$use_custom"
   cmd_up "."
+}
+
+# Parse --custom flag from arguments
+# Returns "true" if --custom is present, "false" otherwise
+# Also removes --custom from the argument list via a global variable
+parse_custom_flag() {
+  USE_CUSTOM="false"
+  REMAINING_ARGS=()
+  for arg in "$@"; do
+    if [[ "$arg" == "--custom" ]]; then
+      USE_CUSTOM="true"
+    else
+      REMAINING_ARGS+=("$arg")
+    fi
+  done
 }
 
 # Main command dispatcher
@@ -378,43 +428,39 @@ main() {
   local command="$1"
   shift
 
+  # Parse --custom flag for commands that support it
+  parse_custom_flag "$@"
+
   case "$command" in
   .)
-    cmd_dot
+    cmd_dot "$USE_CUSTOM"
     ;;
   up)
-    cmd_up "$@"
+    cmd_up "${REMAINING_ARGS[@]:-}"
     ;;
   rebuild)
-    cmd_rebuild "$@"
+    cmd_rebuild "${REMAINING_ARGS[@]:-}"
     ;;
   build-image)
     cmd_build_image
     ;;
   down)
-    cmd_down "$@"
+    cmd_down "${REMAINING_ARGS[@]:-}"
     ;;
   shell)
     cmd_shell
     ;;
-  exec)
-    [[ "${1:-}" == "--" ]] && shift
-    cmd_exec "$@"
-    ;;
-  upgrade)
-    cmd_upgrade
+  upgrade-agents)
+    cmd_upgrade_agents
     ;;
   mount)
-    cmd_mount "$@"
+    cmd_mount "${REMAINING_ARGS[@]:-}"
     ;;
   self-install)
     cmd_self_install
     ;;
   update)
     cmd_update
-    ;;
-  template)
-    cmd_template "$@"
     ;;
   help | --help | -h)
     print_usage

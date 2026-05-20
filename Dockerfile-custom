@@ -1,0 +1,7 @@
+FROM my-ai-sandbox/devcontainer:local
+
+# Add your project-specific customizations below
+# Examples:
+#   RUN apt-get update && apt-get install -y some-package
+#   RUN uv tool install some-python-tool
+#   COPY custom-config /home/vscode/.config/

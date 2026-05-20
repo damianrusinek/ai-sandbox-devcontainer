@@ -32,6 +32,7 @@ setopt ALWAYS_TO_END           # Move cursor to end after completion
 alias fd=fdfind
 alias sg=ast-grep
 alias claude-yolo='claude --dangerously-skip-permissions'
+alias codex-yolo='codex --dangerously-bypass-approvals-and-sandbox'
 alias ll='ls -lah --color=auto'
 alias la='ls -A --color=auto'
 alias l='ls -CF --color=auto'

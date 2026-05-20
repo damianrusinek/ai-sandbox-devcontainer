@@ -1,19 +1,20 @@
 {
   "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
-  "name": "Claude Code Sandbox - ${localWorkspaceFolderBasename}",
-  "image": "my-claude-code/devcontainer:local",
+  "name": "AI Sandbox - ${localWorkspaceFolderBasename}",
+  "image": "my-ai-sandbox/devcontainer:local",
   "runArgs": [
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_RAW",
     "--name",
-    "claude-code-${localWorkspaceFolderBasename}"
+    "ai-sandbox-${localWorkspaceFolderBasename}"
   ],
   "init": true,
   "updateRemoteUserUID": true,
   "customizations": {
     "vscode": {
       "extensions": [
-        "anthropic.claude-code"
+        "anthropic.claude-code",
+        "openai.chatgpt"
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "zsh",
@@ -34,11 +35,13 @@
   },
   "remoteUser": "vscode",
   "mounts": [
-    "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
-    "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
-    "source=claude-code-gh-${devcontainerId},target=/home/vscode/.config/gh,type=volume",
+    "source=ai-sandbox-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+    "source=ai-sandbox-claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
+    "source=ai-sandbox-claude-code-gh-${devcontainerId},target=/home/vscode/.config/gh,type=volume",
+    "source=ai-sandbox-codex-config-${devcontainerId},target=/home/vscode/.codex,type=volume",
     "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,readonly",
-    "source=${localEnv:HOME}/.claude/commands,target=/home/vscode/.claude/commands,type=bind,readonly"
+    "source=${localEnv:HOME}/.claude/commands,target=/home/vscode/.claude/commands,type=bind,readonly",
+    "source=${localEnv:HOME}/.codex/commands,target=/home/vscode/.codex/commands,type=bind,readonly"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
